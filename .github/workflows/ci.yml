@@ -1,6 +1,11 @@
 name: CI
 
 on:
+  # Nightly, so runner-image drift is caught on its own. The suites drive the
+  # built binary against the OS's own enforcement, which can change with no
+  # commit here. Off-the-hour: scheduled runs are delayed most at :00.
+  schedule:
+    - cron: "17 11 * * *"
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
@@ -9,7 +14,9 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Keyed by event too, so a nightly never cancels a merge's validation run:
+  # both would otherwise land in the same `refs/heads/main` group.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -100,3 +107,61 @@ jobs:
         with:
           allowed-skips: rust, containment, verdict
           jobs: ${{ toJSON(needs) }}
+
+  nightly-failure-issue:
+    name: Nightly failure issue
+    # The nightly only: a red PR or push already reports on the PR or the commit,
+    # so an issue per red PR would be pure noise.
+    if: ${{ always() && github.event_name == 'schedule' }}
+    needs: [detect-changes, rust, containment, verdict]
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: File an issue naming every failed leg
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+          # Read step conclusions, not `needs`: the Linux containment leg and the
+          # macOS unit-test leg are continue-on-error, so a break there can report
+          # success at the job level and would otherwise go unreported.
+          failed=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --paginate \
+            --jq '.jobs[]
+                  | select(.name != "Nightly failure issue")
+                  | select(.conclusion == "failure" or any(.steps[]?; .conclusion == "failure"))
+                  | "- `\(.name)`"' | sort -u)
+
+          if [ -z "$failed" ]; then
+            echo "Every leg passed; nothing to file."
+            exit 0
+          fi
+
+          body=$(mktemp)
+          {
+            echo "The nightly containment run failed. This is filed automatically by \`ci.yml\`."
+            echo
+            echo "**Failed:**"
+            echo "$failed"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| run | $run_url |"
+            echo "| commit | \`$GITHUB_SHA\` |"
+            echo "| started | $(date -u +%Y-%m-%dT%H:%M:%SZ) |"
+            echo
+            echo "The suites drive the built binary against the OS's own enforcement, so a"
+            echo "nightly-only failure with no commit of ours usually means the runner image"
+            echo "moved. Reproduce with \`workflow_dispatch\` on \`ci.yml\` before assuming a"
+            echo "product regression."
+            echo
+            echo "cc @strands-agents/strands-box-maintainers"
+          } > "$body"
+
+          gh issue create \
+            --title "Nightly containment suite failed — $(date -u +%Y-%m-%d) (run $GITHUB_RUN_ID)" \
+            --body-file "$body" \
+            --label bug
