@@ -295,14 +295,18 @@ run_harness() {
   local out="$REPORT_DIR/$platform/$case" home commit tarball rc profile
   mkdir -p "$out" || return 1
 
-  home=$(ssh_to "$instance_id" "$user" 'cd ~ && pwd -P' | tr -d '\r' | tail -n 1)
+  # `|| true` on both lookups: under the callers' `set -euo pipefail` a failed remote
+  # command aborts here with no message, so let the checks below say what went wrong.
+  home=$(ssh_to "$instance_id" "$user" 'cd ~ && pwd -P' | tr -d '\r' | tail -n 1) || true
   case "$home" in
     /*) ;;
     *) echo "ERROR: $instance_id did not report an absolute home (got '${home}')" >&2; return 1 ;;
   esac
   # The bootstrap keys its upload by the COMMIT stamp in the box source when there is
   # one (pack_source writes it) and by BOX_COMMIT otherwise; resolve it the same way.
-  commit=$(ssh_to "$instance_id" "$user" 'cat ~/strands-box/COMMIT 2>/dev/null' | tr -d '\r[:space:]')
+  # A source tarball built in CI carries no COMMIT stamp, and the missing file is the
+  # normal case there, not an error: fall through to BOX_COMMIT.
+  commit=$(ssh_to "$instance_id" "$user" 'cat ~/strands-box/COMMIT 2>/dev/null || true' | tr -d '\r[:space:]') || true
   commit="${commit:-${BOX_COMMIT:-unknown}}"
   echo "=== $platform / $case — run $run_id, box $commit ==="
 
