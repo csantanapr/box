@@ -325,6 +325,12 @@ run_harness() {
   # rather than fetching a source from S3, and PATH is the login one that carries
   # the agent install.sh landed.
   if [ "$platform" = macos ]; then profile="$home/.zprofile"; else profile="$home/.bashrc"; fi
+  # AL2023 creates the operator home mode 0700. Root's namespace backend cannot then
+  # traverse it to bind the workspace and the box binaries beneath it ("Permission
+  # denied" during containment apply), so grant traversal only (0711, not listing).
+  if [ "$platform" = linux ]; then
+    ssh_to "$instance_id" "$user" "chmod o+x '$home'" || return 1
+  fi
   ssh_to "$instance_id" "$user" ". '$profile' >/dev/null 2>&1; sudo env PATH=\"\$PATH\" HOME=\"$home\" \
       LEDGER_BUCKET='$ARTIFACTS_BUCKET' BOX_COMMIT='$commit' RUN_ID='$run_id' CASE='$case' \
       PLATFORM='$platform' AWS_REGION='$AWS_REGION' INDET_REUSE_SRC=1 WL_SRC_DIR=\"$home/strands-box\" \
