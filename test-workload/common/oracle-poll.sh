@@ -55,7 +55,7 @@ while true; do
   # The whole forbidden set, not one address: a connection to any address the capture
   # filter covers must be attributable, or RED is unreachable for it.
   hits="$(lsof -nP -i 2>/dev/null \
-    | grep -E "$ORACLE_FORBIDDEN_MATCH" \
+    | grep -E -e "$ORACLE_FORBIDDEN_MATCH" \
     | grep -E 'ESTABLISHED|SYN_SENT' || true)"
 
   if [ -n "$hits" ] && [ "$reported_red" -eq 0 ]; then

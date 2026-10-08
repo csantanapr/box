@@ -282,7 +282,7 @@ positive_control() {
       case ",$pids," in
         *",$pid,"*) seen="$line"; break ;;
       esac
-    done <<< "$(lsof -nP -i 2>/dev/null | grep -E "$ORACLE_FORBIDDEN_MATCH" | grep -E 'ESTABLISHED|SYN_SENT' || true)"
+    done <<< "$(lsof -nP -i 2>/dev/null | grep -E -e "$ORACLE_FORBIDDEN_MATCH" | grep -E 'ESTABLISHED|SYN_SENT' || true)"
     [ -n "$seen" ] && break
     sleep "$ORACLE_POLL_INTERVAL"
   done

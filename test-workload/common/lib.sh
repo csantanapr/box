@@ -327,7 +327,7 @@ run_harness() {
   if [ "$platform" = macos ]; then profile="$home/.zprofile"; else profile="$home/.bashrc"; fi
   ssh_to "$instance_id" "$user" ". '$profile' >/dev/null 2>&1; sudo env PATH=\"\$PATH\" HOME=\"$home\" \
       LEDGER_BUCKET='$ARTIFACTS_BUCKET' BOX_COMMIT='$commit' RUN_ID='$run_id' CASE='$case' \
-      PLATFORM='$platform' AWS_REGION='$AWS_REGION' WL_SRC_DIR=\"$home/strands-box\" \
+      PLATFORM='$platform' AWS_REGION='$AWS_REGION' INDET_REUSE_SRC=1 WL_SRC_DIR=\"$home/strands-box\" \
       bash '$home/indet-harness/test-workload/common/bootstrap.sh'" 2>&1 | tee "$out/run.log" || true
 
   aws s3 cp --recursive --only-show-errors --region "$AWS_REGION" \

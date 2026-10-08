@@ -58,10 +58,17 @@ rm -rf "$RUN_DIR"; mkdir -p "$RUN_DIR/oracle" "$RUN_DIR/agent-a" "$RUN_DIR/agent
 # 1. Fetch + unpack the box source (commit-keyed, latest fallback); recover commit.
 # Only replace an existing tree when a tarball actually downloaded — a manual run
 # with a pre-built box (no S3 source) must not be wiped.
+# INDET_REUSE_SRC=1 (manual/run_harness) skips the fetch entirely: install.sh built the
+# box under test in $SRC, and the latest.tar.gz fallback would silently swap in
+# whatever box was last staged there instead.
 rm -f /tmp/src.tgz
 PFX="${STAGE_PREFIX:+${STAGE_PREFIX%/}/}"   # optional staging prefix (from send step); empty = bucket root
-"$AWS" s3 cp "s3://$LEDGER_BUCKET/${PFX}box-src/$BOX_COMMIT.tar.gz" /tmp/src.tgz 2>/dev/null \
-  || "$AWS" s3 cp "s3://$LEDGER_BUCKET/${PFX}box-src/latest.tar.gz" /tmp/src.tgz 2>/dev/null || log "source download FAILED"
+if [ "${INDET_REUSE_SRC:-0}" = 1 ] && [ -d "$SRC" ]; then
+  log "INDET_REUSE_SRC=1 — using the installed source at $SRC, no S3 fetch"
+else
+  "$AWS" s3 cp "s3://$LEDGER_BUCKET/${PFX}box-src/$BOX_COMMIT.tar.gz" /tmp/src.tgz 2>/dev/null \
+    || "$AWS" s3 cp "s3://$LEDGER_BUCKET/${PFX}box-src/latest.tar.gz" /tmp/src.tgz 2>/dev/null || log "source download FAILED"
+fi
 if [ -s /tmp/src.tgz ]; then
   rm -rf "$SRC"; mkdir -p "$SRC"
   tar xzf /tmp/src.tgz -C "$SRC" 2>/dev/null || log "source extract FAILED"
@@ -95,15 +102,18 @@ fi
 # The case's agent-b.sh judges the run with workload-oracle (test-workload/verdict) and
 # refuses to fall back to a score without it, so a box built without it yields no
 # verdict at all. Built separately so a reused box still gets one.
-if [ ! -x "$SRC/target/release/workload-oracle" ]; then
+# The crate is excluded from the root workspace (Cargo.toml), so it builds from its own
+# directory into its own target/.
+VERDICT_BIN="$SRC/test-workload/verdict/target/release"
+if [ ! -x "$VERDICT_BIN/workload-oracle" ]; then
   # shellcheck disable=SC1091
   source "$HOME/.cargo/env" 2>/dev/null || true
-  ( cd "$SRC" && cargo build -p workload-verdict --bin workload-oracle --release ) \
+  ( cd "$SRC/test-workload/verdict" && cargo build --release --bin workload-oracle ) \
     >>/tmp/box-build.log 2>&1 || log "workload-oracle build FAILED (see /tmp/box-build.log)"
 fi
 # shellcheck disable=SC1091
 source "$HOME/.cargo/env" 2>/dev/null || true
-export PATH="$SRC/target/release:/usr/local/bin:/opt/homebrew/bin:$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+export PATH="$SRC/target/release:$VERDICT_BIN:/usr/local/bin:/opt/homebrew/bin:$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
 # 3. Claude Code via the official standalone installer (cross-platform, no npm/node
 #    dependency). It drops a self-contained binary at ~/.local/bin/claude on BOTH
