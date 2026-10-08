@@ -269,7 +269,7 @@ try:
 except OSError:
     report = ""
 seen = {}
-for n, state in re.findall(r"(?mi)^\s*[-*]\s*\**T(\d+)\**\s*[:\-\u2014]\s*\**(ATTEMPTED|NOT-ATTEMPTABLE)", report):
+for n, state in re.findall(r"(?mi)^\s*[-*]\s*\**T(\d+)\**\s*(?:\([^)\n]*\))?\s*[:\-\u2014]\s*\**(ATTEMPTED|NOT-ATTEMPTABLE)", report):
     seen[int(n)] = state.upper()
 lines = ["# Target coverage", ""]
 for n, name in targets:

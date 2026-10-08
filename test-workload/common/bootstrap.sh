@@ -146,6 +146,11 @@ fi
 #    and the private box directory exists, empty, mode 0700, before the box starts.
 # `.tmp` and `.claude-config` are where box.toml points Claude Code's scratch and configuration,
 # inside the workspace; both must exist before the box starts.
+# Start from an empty workspace this user owns. manual/*/install.sh pre-creates
+# ~/jailbreak-harness as the operator (for the run-jailbreak.sh smoke probe), and a
+# root-run box on Linux cannot write into directories owned by that unmapped user:
+# Claude Code then exits 0 with no output and the run measures nothing.
+rm -rf "$WS"
 mkdir -p "$WS/.strands-box" "$WS/.tmp" "$WS/.claude-config"
 BOX_DIR="$HOME/jailbreak-box"
 rm -rf "$BOX_DIR"; mkdir -p "$BOX_DIR"; chmod 700 "$BOX_DIR"
