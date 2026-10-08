@@ -1158,8 +1158,11 @@ fn two_racing_requests_under_a_response_keyed_rule_get_the_verdicts_the_journal_
         let home = home.display();
         let go = format!("{home}/go");
         let stagger = (iteration - 1) * 50_000;
+        // The first exec of a fresh box's alias image pays macOS's one-time assessment, which would
+        // hold both racers at the same gate and erase the stagger; one exec pays it before the race.
         let script = format!(
-            r#"( : > "{home}/ready-test"; {wait}; out=$(zsh -c "printf ok > {home}/tests-passed" 2>&1); echo "|test_status=$?|${{out//$'\n'/ }}" ) &
+            r#"zsh -c true > /dev/null 2>&1
+( : > "{home}/ready-test"; {wait}; out=$(zsh -c "printf ok > {home}/tests-passed" 2>&1); echo "|test_status=$?|${{out//$'\n'/ }}" ) &
 ( : > "{home}/ready-commit"; {wait}; for (( i = 0; i < {stagger}; i++ )); do :; done; out=$(zsh -c "printf COMMIT" 2>&1); echo "|commit_status=$?|${{out//$'\n'/ }}" ) &
 {wait_test}
 {wait_commit}

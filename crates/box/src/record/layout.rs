@@ -92,6 +92,12 @@ const MCP_WORKING_DIRECTORY: &str = "mcp";
 /// Records which installed image the placed aliases were copied from.
 const ALIAS_STAMP_FILE: &str = "alias-image.stamp";
 
+/// The box's own copy of the alias image, which every alias name in `bin/` links to.
+pub(crate) const ALIAS_IMAGE_FILE: &str = ".alias-image";
+
+/// Where a replacement image is written before it is renamed over [`ALIAS_IMAGE_FILE`].
+const ALIAS_IMAGE_PENDING_FILE: &str = ".alias-image.pending";
+
 /// The lock that serializes `configure` against itself and against `start`.
 const LOCK_FILE: &str = ".lock";
 
@@ -494,6 +500,11 @@ impl BoxRoot {
         self.root.join(BIN_DIRECTORY)
     }
 
+    /// This box's own alias image, the one inode every alias name in `bin/` links to.
+    pub(crate) fn alias_image(&self) -> PathBuf {
+        self.bin_directory().join(ALIAS_IMAGE_FILE)
+    }
+
     /// Every Shell alias path, one per conventional shell name.
     pub(crate) fn all_aliases(
         &self,
@@ -870,30 +881,83 @@ impl BoxRoot {
         Ok(())
     }
 
-    /// Place one source file below this Box through its retained identity.
-    pub(crate) fn install_file(
+    /// Link `destination` to `source`, both below this root, through their retained parents.
+    pub(crate) fn link_file(&self, source: &Path, destination: &Path) -> Result<(), BoxError> {
+        self.verify_identity()?;
+        let create = |source| {
+            BoxError::from(LayoutError::Create {
+                path: destination.to_path_buf(),
+                source,
+            })
+        };
+        let (source_anchor, source_relative) = self
+            .identity_anchor(source)?
+            .ok_or_else(|| create(std::io::Error::other("the root has no retained identity")))?;
+        let (destination_anchor, destination_relative) = self
+            .identity_anchor(destination)?
+            .ok_or_else(|| create(std::io::Error::other("the root has no retained identity")))?;
+        link_relative_file(
+            source_anchor,
+            source_relative,
+            destination_anchor,
+            destination_relative,
+        )
+        .map_err(create)?;
+        self.verify_identity()
+    }
+
+    /// Place a private copy of `source` at `destination`: a clone where the volume clones, a byte
+    /// copy elsewhere, renamed into place so the name never names a partial file.
+    pub(crate) fn install_private_image(
         &self,
         source: &Path,
         destination: &Path,
         mode: u32,
     ) -> Result<(), BoxError> {
         self.verify_identity()?;
-        let Some((anchor, relative)) = self.identity_anchor(destination)? else {
-            return install_file_at_path(source, destination, mode).map_err(|source| {
-                LayoutError::Create {
-                    path: destination.to_path_buf(),
-                    source,
-                }
-                .into()
-            });
-        };
-        install_relative_file(anchor, relative, source, mode).map_err(|source| {
+        let create = |source| {
             BoxError::from(LayoutError::Create {
                 path: destination.to_path_buf(),
                 source,
             })
-        })?;
+        };
+        let name = destination
+            .file_name()
+            .ok_or_else(|| create(std::io::Error::other("the destination has no file name")))?;
+        let parent = match self.identity_anchor(destination)? {
+            Some((anchor, relative)) => open_relative_parent(anchor, relative)
+                .map(|(parent, _)| parent)
+                .map_err(create)?,
+            None => {
+                let directory = destination.parent().ok_or_else(|| {
+                    create(std::io::Error::other("the destination has no parent"))
+                })?;
+                open_without_following(directory).map_err(create)?
+            }
+        };
+        place_private_image(&parent, name, source, mode).map_err(create)?;
         self.verify_identity()
+    }
+
+    /// The `(device, inode)` of one path below this root, or `None` when nothing is there.
+    pub(crate) fn file_identity(&self, path: &Path) -> Result<Option<(u64, u64)>, BoxError> {
+        self.verify_identity()?;
+        let result = match self.open_file_on_identity(path, libc::O_RDONLY) {
+            Ok(file) => file
+                .metadata()
+                .map(|metadata| Some((metadata.dev(), metadata.ino())))
+                .map_err(|source| LayoutError::ReadDirectory {
+                    path: path.to_path_buf(),
+                    source,
+                }),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(source) => Err(LayoutError::ReadDirectory {
+                path: path.to_path_buf(),
+                source,
+            }),
+        };
+        self.verify_identity()?;
+        result.map_err(Into::into)
     }
 
     fn create_directory_on_identity(&self, path: &Path) -> Result<(), BoxError> {
@@ -1540,92 +1604,157 @@ fn remove_relative_file(_anchor: &std::fs::File, _relative: &Path) -> std::io::R
     ))
 }
 
+/// Replace `destination` with a hard link to `source`, each named below its retained parent.
 #[cfg(unix)]
-fn install_relative_file(
-    anchor: &std::fs::File,
-    relative: &Path,
-    source: &Path,
-    mode: u32,
+fn link_relative_file(
+    source_anchor: &std::fs::File,
+    source_relative: &Path,
+    destination_anchor: &std::fs::File,
+    destination_relative: &Path,
 ) -> std::io::Result<()> {
-    let (parent, name) = open_relative_parent(anchor, relative)?;
-    let destination = c_name(&name)?;
-    // SAFETY: destination is one valid component below the retained parent.
-    let _ = unsafe { libc::unlinkat(parent.as_raw_fd(), destination.as_ptr(), 0) };
-    let source_name = c_name(source.as_os_str())?;
-    // SAFETY: both path arguments are valid C strings and destination is below the retained parent.
+    let (source_parent, source_name) = open_relative_parent(source_anchor, source_relative)?;
+    let (destination_parent, destination_name) =
+        open_relative_parent(destination_anchor, destination_relative)?;
+    let source_name = c_name(&source_name)?;
+    let destination_name = c_name(&destination_name)?;
+    // SAFETY: destination_name is one valid component below the retained parent.
+    let _ = unsafe { libc::unlinkat(destination_parent.as_raw_fd(), destination_name.as_ptr(), 0) };
+    // SAFETY: both names are valid components below their own retained parents.
     if unsafe {
         libc::linkat(
-            libc::AT_FDCWD,
+            source_parent.as_raw_fd(),
             source_name.as_ptr(),
-            parent.as_raw_fd(),
-            destination.as_ptr(),
+            destination_parent.as_raw_fd(),
+            destination_name.as_ptr(),
             0,
         )
-    } == 0
+    } == -1
     {
-        return Ok(());
+        return Err(std::io::Error::last_os_error());
     }
-    let link_error = std::io::Error::last_os_error();
-    if link_error.raw_os_error() != Some(libc::EXDEV) {
-        return Err(link_error);
-    }
-    let mut source = open_without_following(source)?;
-    let expected = source.metadata()?.len();
-    let mut destination_file = open_child_name_with_mode(
-        &parent,
-        destination.as_c_str(),
-        libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-        mode as libc::mode_t,
-    )?;
-    let copied = std::io::copy(&mut source, &mut destination_file)?;
-    if copied != expected {
-        return Err(std::io::Error::other(format!(
-            "copied {copied} of {expected} bytes"
-        )));
-    }
-    destination_file
-        .flush()
-        .and_then(|()| destination_file.sync_all())?;
-    destination_file.set_permissions(std::fs::Permissions::from_mode(mode))
+    Ok(())
 }
 
 #[cfg(not(unix))]
-fn install_relative_file(
-    _anchor: &std::fs::File,
-    _relative: &Path,
+fn link_relative_file(
+    _source_anchor: &std::fs::File,
+    _source_relative: &Path,
+    _destination_anchor: &std::fs::File,
+    _destination_relative: &Path,
+) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "this platform cannot link through a directory descriptor",
+    ))
+}
+
+/// Write `source` under `name` in `parent` as a new inode, then rename it over `name`'s final form.
+#[cfg(unix)]
+fn place_private_image(
+    parent: &std::fs::File,
+    name: &std::ffi::OsStr,
+    source: &Path,
+    mode: u32,
+) -> std::io::Result<()> {
+    let pending = c_name(std::ffi::OsStr::new(ALIAS_IMAGE_PENDING_FILE))?;
+    let final_name = c_name(name)?;
+    // SAFETY: pending is one valid component and unlinkat uses the retained parent.
+    let _ = unsafe { libc::unlinkat(parent.as_raw_fd(), pending.as_ptr(), 0) };
+    let mut source = open_without_following(source)?;
+    if let Err(clone_error) = clone_image(&source, parent, pending.as_c_str()) {
+        // SAFETY: pending is one valid component and unlinkat uses the retained parent.
+        let _ = unsafe { libc::unlinkat(parent.as_raw_fd(), pending.as_ptr(), 0) };
+        copy_image(&mut source, parent, pending.as_c_str(), mode).map_err(|copy_error| {
+            std::io::Error::new(
+                copy_error.kind(),
+                format!("clone failed ({clone_error}), then copy failed: {copy_error}"),
+            )
+        })?;
+    }
+    let placed = open_child_name(
+        parent,
+        pending.as_c_str(),
+        libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+    )?;
+    placed.set_permissions(std::fs::Permissions::from_mode(mode))?;
+    placed.sync_all()?;
+    // SAFETY: both names are valid components below the one retained parent.
+    if unsafe {
+        libc::renameat(
+            parent.as_raw_fd(),
+            pending.as_ptr(),
+            parent.as_raw_fd(),
+            final_name.as_ptr(),
+        )
+    } == -1
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn place_private_image(
+    _parent: &std::fs::File,
+    _name: &std::ffi::OsStr,
     _source: &Path,
     _mode: u32,
 ) -> std::io::Result<()> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
-        "this platform cannot install through a directory descriptor",
+        "this platform cannot place a file through a directory descriptor",
     ))
 }
 
-fn install_file_at_path(source: &Path, destination: &Path, mode: u32) -> std::io::Result<()> {
-    let _ = std::fs::remove_file(destination);
-    match std::fs::hard_link(source, destination) {
-        Ok(()) => return Ok(()),
-        Err(error) if error.raw_os_error() == Some(libc::EXDEV) => {}
-        Err(error) => return Err(error),
+/// Clone `source` to `name` in `parent` as a new inode sharing the source's blocks.
+#[cfg(target_os = "macos")]
+fn clone_image(
+    source: &std::fs::File,
+    parent: &std::fs::File,
+    name: &std::ffi::CStr,
+) -> std::io::Result<()> {
+    // SAFETY: both descriptors are open and name is one valid component below parent.
+    if unsafe { libc::fclonefileat(source.as_raw_fd(), parent.as_raw_fd(), name.as_ptr(), 0) } == -1
+    {
+        return Err(std::io::Error::last_os_error());
     }
-    let mut source = open_without_following(source)?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn clone_image(
+    _source: &std::fs::File,
+    _parent: &std::fs::File,
+    _name: &std::ffi::CStr,
+) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "this platform clones no file",
+    ))
+}
+
+/// Copy `source` byte for byte to a new file `name` in `parent`.
+#[cfg(unix)]
+fn copy_image(
+    source: &mut std::fs::File,
+    parent: &std::fs::File,
+    name: &std::ffi::CStr,
+    mode: u32,
+) -> std::io::Result<()> {
     let expected = source.metadata()?.len();
-    let mut destination_file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(mode)
-        .open(destination)?;
-    let copied = std::io::copy(&mut source, &mut destination_file)?;
+    let mut destination = open_child_name_with_mode(
+        parent,
+        name,
+        libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        mode as libc::mode_t,
+    )?;
+    let copied = std::io::copy(source, &mut destination)?;
     if copied != expected {
         return Err(std::io::Error::other(format!(
             "copied {copied} of {expected} bytes"
         )));
     }
-    destination_file
-        .flush()
-        .and_then(|()| destination_file.sync_all())?;
-    destination_file.set_permissions(std::fs::Permissions::from_mode(mode))
+    destination.flush().and_then(|()| destination.sync_all())
 }
 
 #[cfg(unix)]
@@ -4347,6 +4476,49 @@ mod tests {
                 path.display()
             );
         }
+    }
+
+    /// **A volume that clones nothing gets a byte copy with the same bytes and the asked mode.**
+    #[test]
+    fn the_byte_copy_fallback_places_an_identical_private_image() {
+        let (layout, _fixture) = layout("codex");
+        let source_path = layout.root().join("source-image");
+        std::fs::write(&source_path, b"the installed image").expect("a source image");
+        let bin = std::fs::File::open(layout.bin_directory()).expect("bin/ opens");
+        let mut source = std::fs::File::open(&source_path).expect("the source opens");
+
+        copy_image(&mut source, &bin, c"copied", 0o500).expect("the copy is placed");
+
+        let copied = layout.bin_directory().join("copied");
+        assert_eq!(
+            std::fs::read(&copied).expect("the copy reads"),
+            b"the installed image"
+        );
+        let metadata = std::fs::symlink_metadata(&copied).expect("the copy exists");
+        assert_eq!(metadata.mode() & 0o777, 0o500);
+        assert_ne!(
+            metadata.ino(),
+            std::fs::symlink_metadata(&source_path)
+                .expect("the source exists")
+                .ino(),
+            "a copy is its own inode"
+        );
+
+        // The placement path renames the pending file over the final name and leaves no pending
+        // file behind, whichever of clone or copy produced it.
+        layout
+            .install_private_image(&source_path, &layout.alias_image(), 0o500)
+            .expect("the image is placed");
+        assert_eq!(
+            std::fs::read(layout.alias_image()).expect("the image reads"),
+            b"the installed image"
+        );
+        assert!(
+            !layout
+                .bin_directory()
+                .join(ALIAS_IMAGE_PENDING_FILE)
+                .exists()
+        );
     }
 
     /// The workload's `PATH` directory starts empty.

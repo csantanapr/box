@@ -102,7 +102,9 @@ workspace <path>```, ``configuration source <path> is inside `box_dir` <path>``,
 
 The directory holds `bin`, `run`, `trust`, and `private`. None of them is a home, and no box reaches
 its own private tree from inside. It stays until you delete it: end the `run` process to stop a box,
-and remove the directory to delete one.
+and remove the directory after `run` has exited to delete one. Do not remove the directory while
+its `run` is alive: on macOS, the kernel kills a shell or Python call of that box whose program file
+loses a name during its security assessment.
 
 ## `[agent]` and `[tool.<name>]`
 

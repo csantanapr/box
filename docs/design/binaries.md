@@ -76,11 +76,12 @@ The alias is part of the workload, so it's untrusted, and the broker treats ever
 hostile
 ([the broker protocol](decisions.md#the-broker-protocol-is-framed-versioned-and-refuses-with-a-reason-code)).
 
-`strands-box` places the alias with a hard link, or a copy when `bin/` is on a different file
-system. It records the size and modification time of the installed file in
-`private/alias-image.stamp`, and puts fresh copies in place when either changes. The alias and the
-broker are built from the same protocol code, and the broker refuses a request with a different
-protocol version.
+`strands-box` gives each box its own copy of the alias image, `bin/.alias-image`, cloned from the
+installed file where the file system supports clones and copied byte for byte elsewhere, and places
+every alias name as a hard link to that copy. It records the SHA-256 of the installed file in
+`private/alias-image.stamp`, and replaces the copy and its links when the digest changes. It
+replaces nothing while the box's workload runs. The alias and the broker are built from the same
+protocol code, and the broker refuses a request with a different protocol version.
 
 ## How the three fit together
 

@@ -242,7 +242,7 @@ fn prepare(config: &Path, argv: &[OsString]) -> Result<LockedRun, BoxError> {
 
     let aliased = request.record.mcp.clone();
     if !existed || !project_matches_record(&request, &root)? {
-        crate::run::configure::write(&root, &request)?;
+        crate::run::configure::write(&root, &request, &owned)?;
         let state = if existed { "updated" } else { "created" };
         eprintln!(
             "strands-box: box {} {state} · config {}",
@@ -250,7 +250,7 @@ fn prepare(config: &Path, argv: &[OsString]) -> Result<LockedRun, BoxError> {
             config.display()
         );
     } else if crate::run::broker::aliases::is_stale(&root, &aliased) {
-        crate::run::broker::aliases::materialize(&root, &aliased)?;
+        crate::run::broker::aliases::materialize(&root, &aliased, &owned)?;
         eprintln!("strands-box: box {} alias image refreshed", root.box_id());
     }
 

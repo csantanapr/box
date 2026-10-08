@@ -116,7 +116,7 @@ fn a_program_permit_starts_its_server() {
     let mut run = box_.spawn();
     run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     let mut client = box_.open_client("alpha-mcp");
-    run.wait_for(box_.server_started("alpha-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("alpha-mcp"), STARTUP);
     assert_eq!(box_.invocation_count("alpha-mcp"), 1);
     client.initialize_and_activate(json!("initialize-alpha"), STARTUP);
     client.assert_running();
@@ -153,7 +153,7 @@ fn a_program_forbid_refuses_only_its_server() {
     assert_start_refused(&box_, "alpha-mcp", Some("no_start_alpha-mcp"));
 
     let mut beta_client = box_.open_client("beta-mcp");
-    run.wait_for(box_.server_started("beta-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("beta-mcp"), STARTUP);
     assert_eq!(box_.invocation_count("beta-mcp"), 1);
     beta_client.assert_running();
 

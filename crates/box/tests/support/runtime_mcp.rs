@@ -26,6 +26,14 @@ const AGENT_HOME: &str = "agent-home";
 const UNRELATED_SENTINEL: &str = "STRANDS_BOX_DISCOVERY_SENTINEL";
 const POLL: Duration = Duration::from_millis(20);
 
+/// What the first exec of a fresh box's own alias image may add on macOS, where the system assesses
+/// the new file once and serializes that assessment across every box starting on the host.
+const FIRST_ALIAS_EXEC: Duration = if cfg!(target_os = "macos") {
+    Duration::from_secs(30)
+} else {
+    Duration::ZERO
+};
+
 #[derive(Clone, Copy)]
 pub enum DiscoveryBehavior {
     Ready,
@@ -1086,6 +1094,8 @@ pub struct RunningBox {
     name: String,
     stdout: CapturedOutput,
     stderr: CapturedOutput,
+    /// Whether a program reached through this box's alias has been awaited once already.
+    alias_exec_awaited: bool,
 }
 
 impl RunningBox {
@@ -1098,6 +1108,7 @@ impl RunningBox {
             name,
             stdout,
             stderr,
+            alias_exec_awaited: false,
         }
     }
 
@@ -1108,6 +1119,18 @@ impl RunningBox {
             .try_wait()
             .expect("inspect strands-box run")
             .is_none()
+    }
+
+    /// Wait for a marker a program reached through this box's alias writes: the first such wait
+    /// on a run carries the one-time cost of the box's own alias image, and later ones do not.
+    pub fn wait_for_through_alias(&mut self, path: impl AsRef<Path>, timeout: Duration) {
+        let allowance = if self.alias_exec_awaited {
+            Duration::ZERO
+        } else {
+            FIRST_ALIAS_EXEC
+        };
+        self.alias_exec_awaited = true;
+        self.wait_for(path, timeout + allowance);
     }
 
     pub fn wait_for(&mut self, path: impl AsRef<Path>, timeout: Duration) {

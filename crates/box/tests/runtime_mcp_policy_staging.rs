@@ -511,8 +511,8 @@ fn authority_after_discovery_order(name: &str, beta_first: bool) -> (Value, Valu
     run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     let mut alpha_client = box_.open_client("alpha-mcp");
     let mut beta_client = box_.open_client("beta-mcp");
-    run.wait_for(box_.server_started("alpha-mcp"), STARTUP);
-    run.wait_for(box_.server_started("beta-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("alpha-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("beta-mcp"), STARTUP);
     alpha_client.initialize_and_activate(json!("alpha-initialize"), STARTUP);
     beta_client.initialize_and_activate(json!("beta-initialize"), STARTUP);
 
@@ -588,7 +588,7 @@ fn open_starts_only_the_selected_server_and_initialize_does_not_discover() {
     );
 
     let mut alpha_client = box_.open_client("alpha-mcp");
-    run.wait_for(box_.server_started("alpha-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("alpha-mcp"), STARTUP);
     assert_eq!(box_.invocation_count("alpha-mcp"), 1);
     assert_eq!(
         box_.list_count("alpha-mcp"),
@@ -638,7 +638,7 @@ fn tool_call_before_root_list_returns_an_error_without_starting_discovery() {
     let mut run = box_.spawn();
     run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     let mut client = box_.open_client("alpha-mcp");
-    run.wait_for(box_.server_started("alpha-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("alpha-mcp"), STARTUP);
     client.initialize_and_activate(json!(1), STARTUP);
     run.wait_for(box_.server_initialized("alpha-mcp"), STARTUP);
 
@@ -682,7 +682,7 @@ fn an_absent_catalog_tool_reaches_neither_policy_observer_nor_server() {
     let mut run = box_.spawn();
     run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     let mut client = box_.open_client("alpha-mcp");
-    run.wait_for(box_.server_started("alpha-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("alpha-mcp"), STARTUP);
     client.initialize_and_activate(json!(1), STARTUP);
     let list = client.list_root(json!(2), STARTUP);
     assert_list_response(&list, &json!(2), "read");
@@ -755,7 +755,7 @@ fn a_policy_denied_list_reaches_neither_discovery_nor_the_server() {
     let mut run = box_.spawn();
     run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     let mut client = box_.open_client("alpha-mcp");
-    run.wait_for(box_.server_started("alpha-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("alpha-mcp"), STARTUP);
     client.initialize_and_activate(json!(1), STARTUP);
 
     let refusal = client.list_root(json!(2), STARTUP);
@@ -843,7 +843,7 @@ fn a_shell_spawn_forbid_on_git_refuses_the_binary_and_leaves_the_git_servers_too
     );
 
     let mut client = box_.open_client("git-mcp");
-    run.wait_for(box_.server_started("git-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("git-mcp"), STARTUP);
     client.initialize_and_activate(json!(1), STARTUP);
     let list = client.list_root(json!(2), STARTUP);
     assert_list_response(&list, &json!(2), "status");
@@ -926,7 +926,7 @@ fn a_denied_tools_call_answers_the_requests_id_with_the_decision_and_the_method(
     let mut run = box_.spawn();
     run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     let mut client = box_.open_client("alpha-mcp");
-    run.wait_for(box_.server_started("alpha-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("alpha-mcp"), STARTUP);
     client.initialize_and_activate(json!("initialize-1"), STARTUP);
     let list = client.list_root(json!(2), STARTUP);
     assert_list_response(&list, &json!(2), "read");
@@ -1279,7 +1279,7 @@ fn multipage_exchange_routes_server_frames_and_stages_on_the_last_page() {
     let mut run = box_.spawn();
     run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     let mut client = box_.open_client("alpha-mcp");
-    run.wait_for(box_.server_started("alpha-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("alpha-mcp"), STARTUP);
     client.initialize_and_activate(json!("initialize"), STARTUP);
     let request_shape = json!({
         "scope": "all",
@@ -1417,7 +1417,7 @@ fn catalog_page_limit_accepts_256_pages_and_refuses_a_257th() {
         let mut run = box_.spawn();
         run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
         let mut client = box_.open_client("paged-mcp");
-        run.wait_for(box_.server_started("paged-mcp"), STARTUP);
+        run.wait_for_through_alias(box_.server_started("paged-mcp"), STARTUP);
         client.initialize_and_activate(json!("initialize"), STARTUP);
         let exchange = client.list_all(1, json!({}), CATALOG_TIMEOUT);
         assert_eq!(exchange.pages.len(), pages, "the client pages to the end");
@@ -1479,7 +1479,7 @@ fn time_to_first_catalog(pages: usize) -> Duration {
     let mut run = box_.spawn();
     run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     let mut client = box_.open_client("paged-mcp");
-    run.wait_for(box_.server_started("paged-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("paged-mcp"), STARTUP);
     client.initialize_and_activate(json!("initialize"), STARTUP);
     let started = std::time::Instant::now();
     let exchange = client.list_all(1, json!({}), CATALOG_TIMEOUT);
@@ -1580,7 +1580,7 @@ fn invalid_catalog_variants_fail_closed_through_the_lazy_exchange() {
     run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     for (index, server) in servers.iter().enumerate() {
         let mut client = box_.open_client(server.program);
-        run.wait_for(box_.server_started(server.program), STARTUP);
+        run.wait_for_through_alias(box_.server_started(server.program), STARTUP);
         client.initialize_and_activate(json!(index), STARTUP);
         let exchange = client.list_all(100, json!({}), STARTUP);
         assert_eq!(
@@ -1636,7 +1636,7 @@ fn alpha_stays_ready_while_beta_is_discovered() {
     let mut run = box_.spawn();
     run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     let mut alpha_client = box_.open_client("alpha-mcp");
-    run.wait_for(box_.server_started("alpha-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("alpha-mcp"), STARTUP);
     alpha_client.initialize_and_activate(json!("alpha-init"), STARTUP);
     run.wait_for(box_.server_initialized("alpha-mcp"), STARTUP);
     let alpha_list = alpha_client.list_root(json!("alpha-list"), STARTUP);
@@ -1656,7 +1656,7 @@ fn alpha_stays_ready_while_beta_is_discovered() {
     );
 
     let mut beta_client = box_.open_client("beta-mcp");
-    run.wait_for(box_.server_started("beta-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("beta-mcp"), STARTUP);
     beta_client.initialize_and_activate(json!("beta-init"), STARTUP);
     run.wait_for(box_.server_initialized("beta-mcp"), STARTUP);
     beta_client.request_root_list(json!("beta-list"));
@@ -1718,7 +1718,7 @@ fn child_exit_after_ready_keeps_the_accepted_catalog() {
     let mut run = box_.spawn();
     run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     let mut first = box_.open_client("alpha-mcp");
-    run.wait_for(box_.server_started("alpha-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("alpha-mcp"), STARTUP);
     first.initialize_and_activate(json!("first-initialize"), STARTUP);
     let accepted = first.list_root(json!("first-list"), STARTUP);
     assert_list_response(&accepted, &json!("first-list"), "read");
@@ -1729,7 +1729,7 @@ fn child_exit_after_ready_keeps_the_accepted_catalog() {
     let _ = first.wait(SHUTDOWN);
 
     let mut second = box_.open_client("alpha-mcp");
-    run.wait_for(box_.server_started("alpha-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("alpha-mcp"), STARTUP);
     second.initialize_and_activate(json!("second-initialize"), STARTUP);
     let relisted = second.list_root(json!(902), STARTUP);
     assert_list_response(&relisted, &json!(902), "read");
@@ -1774,7 +1774,7 @@ fn unused_beta_stays_unstarted_and_prevents_completion() {
     let mut run = box_.spawn();
     run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     let mut alpha_client = box_.open_client("alpha-mcp");
-    run.wait_for(box_.server_started("alpha-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("alpha-mcp"), STARTUP);
     alpha_client.initialize_and_activate(json!(1), STARTUP);
     alpha_client.list_root(json!(2), STARTUP);
     let ready = alpha_client.call(json!(3), "read", STARTUP);
@@ -1823,7 +1823,7 @@ fn unresolved_completion_keeps_ready_tools_and_withdraws_live_state_on_exit() {
     run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     run.wait_for(box_.live_record(), STARTUP);
     let mut client = box_.open_client("alpha-mcp");
-    run.wait_for(box_.server_started("alpha-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("alpha-mcp"), STARTUP);
     client.initialize_and_activate(json!(1), STARTUP);
     let response = client.list_root(json!(2), STARTUP);
     assert_list_response(&response, &json!(2), "read");
@@ -1886,7 +1886,7 @@ fn failed_discovery_reaps_its_process_group_and_refuses_later_open() {
     let mut run = box_.spawn();
     run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     let mut client = box_.open_client("broken-mcp");
-    run.wait_for(box_.server_started("broken-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("broken-mcp"), STARTUP);
     client.initialize_and_activate(json!(1), STARTUP);
     client.request_root_list(json!(2));
     run.wait_for(box_.list_started("broken-mcp"), STARTUP);
@@ -2020,7 +2020,7 @@ fn discovery_timeout_reaps_its_process_group_and_refuses_later_open() {
     let mut run = box_.spawn();
     run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     let mut client = box_.open_client("slow-mcp");
-    run.wait_for(box_.server_started("slow-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("slow-mcp"), STARTUP);
     client.initialize_and_activate(json!(1), STARTUP);
     client.request_root_list(json!(2));
     run.wait_for(box_.list_started("slow-mcp"), STARTUP);
@@ -2087,7 +2087,7 @@ fn at_most_four_catalog_attempts_progress_concurrently() {
     let mut clients = Vec::new();
     for (index, server) in servers.iter().enumerate() {
         let mut client = box_.open_client(server.program);
-        run.wait_for(box_.server_started(server.program), STARTUP);
+        run.wait_for_through_alias(box_.server_started(server.program), STARTUP);
         client.initialize_and_activate(json!(index), STARTUP);
         client.request_root_list(json!(100 + index));
         clients.push(client);
@@ -2141,7 +2141,7 @@ fn open_uses_declared_command_and_trusted_launch_context() {
     let mut run = box_.spawn();
     run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     let client = box_.open_client("trace-mcp");
-    run.wait_for(box_.server_started("trace-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("trace-mcp"), STARTUP);
 
     assert_eq!(
         serde_json::from_str::<Value>(&box_.trace("trace-mcp", "argv"))
@@ -2250,7 +2250,7 @@ fn trusted_launch_path_falls_back_when_the_run_path_is_absent() {
     let mut run = box_.spawn_without_trusted_path();
     run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     let client = box_.open_client("env");
-    run.wait_for(box_.server_started("env"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("env"), STARTUP);
 
     assert_eq!(
         box_.trace("env", "path"),
@@ -2324,7 +2324,7 @@ fn runtime_ignores_workspace_and_private_generated_schema_artifacts() {
     let mut run = box_.spawn();
     run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     let mut client = box_.open_client("alpha-mcp");
-    run.wait_for(box_.server_started("alpha-mcp"), STARTUP);
+    run.wait_for_through_alias(box_.server_started("alpha-mcp"), STARTUP);
     client.initialize_and_activate(json!(1), STARTUP);
     let refused = client.list_root(json!(2), STARTUP);
     assert_eq!(error_code(&refused), Some(-32001), "{refused}");
@@ -2351,7 +2351,7 @@ fn runtime_ignores_workspace_and_private_generated_schema_artifacts() {
     let mut second_run = box_.spawn_from_operator_home();
     second_run.wait_for(box_.workload_path("workload.started"), BOX_STARTUP);
     let mut second_client = box_.open_client("alpha-mcp");
-    second_run.wait_for(box_.server_started("alpha-mcp"), STARTUP);
+    second_run.wait_for_through_alias(box_.server_started("alpha-mcp"), STARTUP);
     second_client.initialize_and_activate(json!(3), STARTUP);
     let refused = second_client.list_root(json!(4), STARTUP);
     assert_eq!(error_code(&refused), Some(-32001), "{refused}");
@@ -2446,7 +2446,7 @@ set -eu
     );
 
     let mut alpha_client = box_.open_client("alpha-mcp");
-    first.wait_for(box_.server_started("alpha-mcp"), STARTUP);
+    first.wait_for_through_alias(box_.server_started("alpha-mcp"), STARTUP);
     alpha_client.initialize_and_activate(json!(1), STARTUP);
     let response = alpha_client.list_root(json!(2), STARTUP);
     assert_list_response(&response, &json!(2), "read");

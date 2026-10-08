@@ -201,6 +201,26 @@ needs a caller identity on the frozen broker protocol and in the policy principa
 cost of this answer: a tool or MCP server cannot reach Strands Shell or Monty, so a bare `bash` or
 `python3` in either sandbox runs the host OS's program inside that sandbox.
 
+Each alias name is a hard link to the box's own alias image, `bin/.alias-image`, and never to the
+installed image. Box places that image at the box's first run as a clone of the installed
+`strands-box-sock-alias`, or as a byte copy on a volume that clones nothing. It keeps the image
+across runs of the same `box_dir`, and replaces it only when the SHA-256 of the installed image
+changes, which `private/alias-image.stamp` records. So the file a box executes has no name outside
+that box's `bin/`, and no other box can remove a name of it. This matters because macOS Gatekeeper
+kills an exec with `SIGKILL` when a name of the file under assessment disappears, and one shared
+image gave every box on a host that power over every other box. Box unlinks an alias name only
+while it holds the run lock and before the workload starts, which is when it reconciles a newer
+installed image or a dropped MCP server, so no exec from that box's workload is in flight.
+`aliases::materialize` takes the lock as an argument, and
+`box_project::a_run_on_a_running_box_is_refused_before_it_touches_an_alias` pins it. Two residuals
+stay: a process that escaped an earlier run's process group can still exec a name the next run
+replaces, and an operator who removes a box directory while its `run` is alive still kills that box's
+own execs. The cost: the host assesses one more file per box, once, at that box's first run, and it
+serializes those assessments, so boxes that start together each wait for the ones before them.
+`every_alias_shares_the_boxs_own_image_inode_and_not_the_installed_one` and
+`a_second_materialize_reuses_the_clone_and_unlinks_no_alias` pin the layout. **Updated:**
+2026-10-07.
+
 <a id="a-box-is-one-kernel-and-many-programs"></a>
 ### A box is one kernel and many programs, and the socket is transport
 
