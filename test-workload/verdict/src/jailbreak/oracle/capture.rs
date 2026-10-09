@@ -1,6 +1,7 @@
 use super::{OwnedChild, sockets::FORBIDDEN};
 use std::{
-    fs, io,
+    fs,
+    io::{self, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     thread,
@@ -10,16 +11,36 @@ use std::{
 pub(super) struct Capture {
     child: OwnedChild,
     path: PathBuf,
+    empty_pcapng: bool,
 }
 
 impl Capture {
     pub(super) fn start(dir: &Path, name: &str) -> io::Result<Self> {
+        Self::launch(
+            dir,
+            name,
+            Command::new("tcpdump"),
+            cfg!(target_os = "macos"),
+        )
+    }
+
+    fn launch(
+        dir: &Path,
+        name: &str,
+        mut command: Command,
+        empty_pcapng: bool,
+    ) -> io::Result<Self> {
         let path = dir.join(name);
+        if path.exists() {
+            fs::remove_file(&path)?;
+        }
+        let log_path = dir.join("tcpdump.log");
         let log = fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(dir.join("tcpdump.log"))?;
-        let child = Command::new("tcpdump")
+            .open(&log_path)?;
+        let log_offset = log.metadata()?.len();
+        let child = command
             .args(["-i", "any", "-n", "-U", "-w"])
             .arg(&path)
             .arg(FORBIDDEN.filter())
@@ -30,18 +51,24 @@ impl Capture {
         let mut capture = Self {
             child: OwnedChild(child),
             path,
+            empty_pcapng,
         };
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             super::super::shutdown::check()?;
             capture.check()?;
-            if fs::metadata(&capture.path).is_ok_and(|m| m.len() >= 24) {
+            let mut current_log = String::new();
+            let mut log = fs::File::open(&log_path)?;
+            log.seek(SeekFrom::Start(log_offset))?;
+            log.read_to_string(&mut current_log)?;
+            if fs::metadata(&capture.path).is_ok_and(|m| ready(m.len(), &current_log, empty_pcapng))
+            {
                 return Ok(capture);
             }
             if Instant::now() >= deadline {
-                return Err(io::Error::other(
-                    "tcpdump did not initialize its capture file",
-                ));
+                return Err(io::Error::other(format!(
+                    "tcpdump did not initialize its capture file: {current_log}"
+                )));
             }
             thread::sleep(Duration::from_millis(100));
         }
@@ -55,6 +82,9 @@ impl Capture {
         Ok(())
     }
     pub(super) fn count(&self) -> io::Result<usize> {
+        if self.empty_pcapng && fs::metadata(&self.path)?.len() == 0 {
+            return Ok(0);
+        }
         count(&self.path)
     }
     pub(super) fn stop(mut self) -> io::Result<usize> {
@@ -98,4 +128,34 @@ fn count(path: &Path) -> io::Result<usize> {
         .lines()
         .filter(|l| !l.trim().is_empty())
         .count())
+}
+
+fn ready(bytes: u64, current_log: &str, empty_pcapng: bool) -> bool {
+    bytes >= 24 || (bytes == 0 && empty_pcapng && current_log.contains("listening on "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn empty_pktap_capture_starts_after_the_listener_is_ready() {
+        let dir = std::env::temp_dir().join(format!("jailbreak-pktap-{}", std::process::id()));
+        fs::create_dir(&dir).unwrap();
+        let mut command = Command::new("sh");
+        command.args(["-c", "printf '' > \"$FAKE_PCAP\"; printf 'tcpdump: listening on any, link-type PKTAP\\n' >&2; exec sleep 30"])
+            .env("FAKE_PCAP", dir.join("capture.pcap"));
+        let started = Instant::now();
+        let capture = Capture::launch(&dir, "capture.pcap", command, true).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!(capture.count().unwrap(), 0);
+        drop(capture);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn empty_capture_requires_pktap_and_a_current_listener_banner() {
+        assert!(!ready(0, "", true));
+        assert!(!ready(0, "tcpdump: listening on any", false));
+        assert!(!ready(12, "tcpdump: listening on any", true));
+        assert!(ready(24, "", false));
+    }
 }
