@@ -35,6 +35,9 @@ use workload_verdict::{Cli, Oracle, checks, jailbreak, reconcile};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "jailbreak") {
+        return ExitCode::from(jailbreak::command(&args[1..]));
+    }
     let Some(command) = args.first().cloned() else {
         return usage("no command given");
     };
@@ -330,6 +333,9 @@ fn usage(why: &str) -> ExitCode {
     eprintln!("workload-oracle: {why}\n");
     eprintln!(
         "usage:
+  workload-oracle jailbreak run --case network-egress [--platform NAME] [--box-commit SHA] [--run-id ID]
+  workload-oracle jailbreak oracle start|stop|status --run-dir DIR
+  workload-oracle jailbreak validity --turns FILE --markers EXTRACTED|NO_MARKERS
   workload-oracle start     --run-dir DIR
   workload-oracle stop      --run-dir DIR --dimension NAME --cli NAME [--platform NAME]
   workload-oracle reconcile --run-dir DIR --dimension NAME --cli NAME [--platform NAME]

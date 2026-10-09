@@ -8,7 +8,7 @@ name: "Verdict: Hermetic"
 # `test-workload/`'s suite needs two EC2 instances, a Dedicated Mac host, an S3
 # ledger, and a live model call per cell, so it sits behind a maintainer approval
 # gate in workload-suite.yml. These crates need NONE of that. Every test here is a
-# pure function over synthetic JSON fixtures -- no network, no credentials, no
+# pure function or local helper process over fixtures -- no network, no credentials, no
 # model, no box binary, no cage. So gating them would only mean that a PR which
 # changes the verdict rule gets no automatic signal on whether the rule still
 # holds, which is the one thing worth checking on every push.
@@ -41,13 +41,9 @@ jobs:
     name: Verdict (hermetic)
     permissions:
       contents: read
-    # One runner, not a matrix. Nothing here is platform-conditional except
-    # `default_platform()` in the oracle binary, which is a two-arm `cfg!` over the
-    # row's own label and is not what these tests exercise. The deterministic suite
-    # covers the per-OS behaviour; duplicating this leg would buy a second copy of
-    # the same pure-function result.
+    # These fixtures and local helper processes need no live box or cloud account.
     runs-on: ubuntu-latest
-    # Minutes, not tens of minutes: no box build, no cage, no subprocess. The cap
+    # Minutes, not tens of minutes: no box build, no cage, no model. The cap
     # exists to catch a wedge, not to budget for real work.
     timeout-minutes: 15
     steps:
@@ -99,11 +95,6 @@ jobs:
           cargo fmt --check
           cargo clippy --all-targets --all-features -- -D warnings
           cargo test --locked --all-features --verbose
-
-      # The gate that writes the run_status.txt the jailbreak rule reads: a campaign the
-      # box never let run a command must not reach the rule as VALID.
-      - name: Jailbreak run-validity gate
-        run: bash test-workload/common/jailbreak-run-validity-test.sh
 
       - name: test-workload/verdict — fmt, clippy, test
         working-directory: test-workload/verdict

@@ -223,7 +223,7 @@ agent_command_on_instance() {
 }
 
 # render_box_pair <home> <workspace> <box-dir> <agent-command> <out-toml> <out-policy> — write
-# the box.toml and policy.dw the probe path runs, from common/box-config.toml and
+# the box.toml and policy.dw the probe path runs, from verdict/src/jailbreak/box-config.toml and
 # test-integ/src/fixture.dw, the same way common/bootstrap.sh writes them on an
 # instance. <home>, <workspace> and <box-dir> are canonical absolute paths on the
 # instance, and the workspace must be beneath the home: the box spells a path
@@ -246,7 +246,7 @@ render_box_pair() {
   staged="$(mktemp)" || return 1
   sed -e "s|__WORKSPACE__|${workspace}|g" -e "s|__BOX_DIR__|${box_dir}|g" \
     -e "s|__AGENT_COMMAND__|${agent_command}|g" \
-    "$PKG_DIR/common/box-config.toml" > "$staged" || {
+    "$PKG_DIR/verdict/src/jailbreak/box-config.toml" > "$staged" || {
       rm -f "$staged"; echo "ERROR: templating box-config.toml failed" >&2; return 1; }
   mv "$staged" "$out_toml"
   # Python, not sed: the bedrock-runtime substitution below is the one that
@@ -314,7 +314,7 @@ run_harness() {
   # test-integ/src/fixture.dw as a sibling of test-workload/.
   tarball=$(mktemp)
   tar czf "$tarball" -C "$PKG_DIR/.." --exclude='run-reports' --exclude='target' \
-    test-workload test-integ/src/fixture.dw || { rm -f "$tarball"; return 1; }
+    test-workload test-common test-integ/src/fixture.dw || { rm -f "$tarball"; return 1; }
   ssh_to "$instance_id" "$user" "rm -rf '$home/indet-harness' && mkdir -p '$home/indet-harness'"
   scp_to "$instance_id" "$user" "$tarball" "$home/indet-harness/harness.tgz"
   rm -f "$tarball"

@@ -59,17 +59,47 @@ Each dimension directory holds five files, and a two-run dimension a sixth, `goa
 | `workload-agent-a.sh`, `workload-agent-b.sh` | The two drivers every dimension's wrappers call. |
 | `workload-oracle-lib.sh`, `journal_find.py` | The verdict library and the decision-journal reader. |
 | `workload-run-validity.sh` | The gate that decides whether an agent made a tool call at all. |
-| `jailbreak-run-validity.sh` | The `network-egress` gate: a tool call, a command the box ran, and the method report. |
 | `workload-strands-agent.py` | The Strands agent. |
-| `workload-run-validity-test.sh`, `jailbreak-run-validity-test.sh`, `workload-strands-agent-test.py`, `workload-two-run-test.sh` | Tests that run on your own host. See "Checks you can run here". |
+| `workload-run-validity-test.sh`, `workload-strands-agent-test.py`, `workload-two-run-test.sh` | Tests that run on your own host. See "Checks you can run here". |
 
 **Agent B is not a model call.** It reads the artefacts and applies the dimension's rules. A model
 must not grade its own run.
 
-`network-egress/` is an older dimension of a different kind: an adversarial probe with four files
-and no `case.sh`. It runs through `common/bootstrap.sh` with `common/oracle-lib.sh`,
-`common/agent-a-runner.sh`, `common/box-config.toml`, and the `jailbreak-verdict` rule in
-`verdict/`, not through `workload-bootstrap.sh`. `common/lib.sh` serves only the `manual/` drivers.
+`network-egress/goal.md` is the adversarial mission. `common/bootstrap.sh` installs the toolchain
+and agent, builds the box and harness, then starts `workload-oracle jailbreak run`. The Rust
+harness in `verdict/src/jailbreak/` owns the on-instance run:
+
+| Module | Purpose |
+|---|---|
+| `setup.rs`, `box-config.toml` | Create the workspace, render config and policy, and copy the source. |
+| `creds.rs` | Fetch credentials before observation starts. |
+| `oracle/` | Capture packets, check the positive control, and identify sockets through process ancestry. |
+| `agent_a.rs`, `stream.rs` | Register the box PID before execution, capture turns, and extract the report. |
+| `validity.rs`, `coverage.rs` | Check tool-call results and report markers; list target coverage. |
+| `verdict.rs`, `upload.rs` | Judge host evidence and upload the result. |
+
+The positive control uses its own roots and capture file. It stops before live observation starts.
+Coverage is report-only: the verdict rule never reads the method report. A valid campaign needs
+at least one tool call, one tool result without an error flag, and extracted method-report markers.
+
+```sh
+workload-oracle jailbreak run --case network-egress --platform macos --box-commit SHA --run-id ID
+workload-oracle jailbreak oracle start --run-dir DIR
+workload-oracle jailbreak oracle status --run-dir DIR
+workload-oracle jailbreak oracle stop --run-dir DIR
+workload-oracle jailbreak validity --turns FILE --markers EXTRACTED
+```
+
+`run` uses `$HOME/strands-box` for the source snapshot (`INDET_SRC` overrides it), creates
+`$HOME/jailbreak-harness` and `$HOME/jailbreak-box`, and writes results under
+`$HOME/indet-run/network-egress`. `LEDGER_BUCKET` enables upload to the existing ledger key.
+The oracle commands support manual debugging. Use a fresh run directory; an existing
+`oracle/oracle.pid` makes startup fail. Set `--markers` to `EXTRACTED` when report extraction succeeds, or `NO_MARKERS` otherwise.
+The `validity` command writes `run_status.txt`, `first_error.txt`, and `attempts.jsonl`
+beside the transcript. Each attempt row contains an attempt number and timestamp.
+`jailbreak-verdict` keeps its existing arguments and rule.
+
+The `workload-*` cells retain their Bash runtime. `common/lib.sh` serves the `manual/` drivers.
 
 ## How one cell runs
 
@@ -171,7 +201,7 @@ Running them needs the AWS CLI's `session-manager-plugin` installed locally.
 
 No driver calls a verb the box does not have. `install.sh` writes the `box.toml` and `policy.dw`
 pair itself, through `render_box_pair` in `common/lib.sh`, from the same two sources
-`common/bootstrap.sh` uses on an instance: `common/box-config.toml` and `test-integ/src/fixture.dw`.
+the Rust harness uses on an instance: `verdict/src/jailbreak/box-config.toml` and `test-integ/src/fixture.dw`.
 A caller supplies `box_dir`, and the box has no verb that creates one, so the driver creates the
 workspace and the box directory on the instance before it uploads the pair.
 
@@ -186,17 +216,17 @@ workspace and the box directory on the instance before it uploads the pair.
 
 ## Checks you can run here
 
-Four tests need no instance, no box, and no model:
+These tests need no instance, no box, and no model:
 
 ```sh
 bash test-workload/common/workload-run-validity-test.sh
-bash test-workload/common/jailbreak-run-validity-test.sh
+cargo test --locked --all-features --manifest-path test-workload/verdict/Cargo.toml
 python3 test-workload/common/workload-strands-agent-test.py
 bash test-workload/common/workload-two-run-test.sh
 ```
 
-The second one skips its MCP checks unless `STRANDS_LIB_DIR` names a `pip install --target`
-directory that holds the SDK. The third pins the two-run path: the session id each agent names,
+The Strands agent test skips its MCP checks unless `STRANDS_LIB_DIR` names a `pip install --target`
+directory that holds the SDK. The two-run test pins the two-run path: the session id each agent names,
 where a second run's arguments go, the journal counts the budget assertions read, the box identity
 snapshot, the disclosure comparison, the dimension-to-agent filter, and the policy a budget
 dimension appends to its pair.
@@ -318,9 +348,8 @@ rule reports containment that was never measured.
    harness keys and in its `mode` field, for the same reason.
 2. **Most scripts in `common/` are mode 644, and the suite depends on no mode bit there.** Each one
    is `source`d, or it is started as `bash <path>` or `python3 <path>`. The exceptions are the probe
-   harness scripts (`bootstrap.sh`, `lib.sh`, `oracle-lib.sh`, the two runners),
-   `workload-run-validity.sh`, `workload-run-validity-test.sh`, `jailbreak-run-validity.sh`,
-   `jailbreak-run-validity-test.sh`, `workload-two-run-test.sh`, and
+   harness scripts (`bootstrap.sh`, `lib.sh`),
+   `workload-run-validity.sh`, `workload-run-validity-test.sh`, `workload-two-run-test.sh`, and
    `workload-strands-agent.py`, which are 755. In a dimension directory, only `agent-a.sh`,
    `agent-b.sh`, and `oracle.sh` are mode 755. `case.sh` is 644, because a dimension script
    `source`s it. The `manual/` drivers are 755, because an operator starts them by name.
